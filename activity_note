@@ -31,6 +31,20 @@ STDOUT << activity {
   }
   obj note {
     content ARGV.shift
+    attachment binary {
+      # binary attachments are base64 and compressed automatically for you 
+      File.open('activity_note','r') { |f| 
+        data f, :deflate
+      } 
+    }
+  }
+  img {
+    url 'http://example.org'
+  }
+  location {
+    position {
+      longitude 180
+      latitude -56.32
+    }
   }
 }
-

@@ -24,6 +24,8 @@
 require 'json'
 require "time"
 require 'addressable/uri'
+require 'base64'
+require 'zlib'
 
 class Hash
   def __object_type= ot
@@ -41,11 +43,8 @@ class Object
     method sym rescue false
   end
   # Tests to see if the Object is one of several possible types
-  def one_of_type? sym, *rest
-    [sym,*rest].each {|x|
-      return true if is_a? x
-    }
-    false
+  def one_of_type? *args
+    args.any? {|x| is_a? x}
   end
 end
 
@@ -59,8 +58,7 @@ module ActivityStreams
       (m =~ /^([a-zA-Z0-9\-\.\_\~]|\%[0-9a-fA-F]{2}|[\!\$\&\'\(\)\*\+\,\;\=])+$/) != nil
     end
     def is_verb? m
-      return true if is_token? m
-      URI.parse(m).absolute?
+      is_token? m || URI.parse(m).absolute?
     end
     def checker &block
       lambda {|v|
@@ -72,8 +70,8 @@ module ActivityStreams
   end
   
   module Makers
-    def copy_from(other,&block)
-      ASObj.from other,&block
+    def copy_from(other,*without,&block)
+      ASObj.from other,*without,&block
     end
     def object(object_type=nil,&block)
       ASObj.generate object_type,&block
@@ -139,44 +137,51 @@ module ActivityStreams
     def initialize object_type=nil
       @_ = {}
       @_.__object_type = object_type
-      @object_type = object_type
-      extend SPECS[object_type] ? SPECS[object_type] : SPECS[nil]
+      @object_type = object_type  
+      extend SPECS[object_type] || SPECS[nil]
       strict
     end
-    def lenient
-      @lenient = true
+    def lenient  
+      @lenient = true   
     end
-    def strict
-      @lenient = false
+    def strict   
+      @lenient = false  
     end
-    def pretty
-      @pretty = true
+    def pretty   
+      @pretty = true    
     end
-    def pretty?
-      @pretty || false
+    def pretty?  
+      @pretty || false  
     end
-    def lenient?
-      @lenient
+    def lenient? 
+      @lenient          
     end
-    def strict?
-      !lenient?
+    def strict?  
+      !lenient?         
     end
-    def __object_type
-      @object_type
-    end
+    def __object_type 
+      @object_type end
+      
     # return a frozen copy of the internal hash
-    def finish
+    def finish 
       @_.dup.freeze
     end
+    
     # write this thing out
     def append_to out
       raise ArgumentError unless out.respond_to?:<<
       out << to_s
     end
     alias :>> append_to
+    
+    def pretty_to out
+      out << JSON.pretty_generate(@_)
+    end
+    
     def to_s
       pretty? ? JSON.pretty_generate(@_) : @_.to_json
     end
+    
     def [] k
       @_[send("alias_for_#{k}".to_sym) || k]
     end
@@ -185,19 +190,21 @@ module ActivityStreams
     # Sets a value on the internal hash without any type checking
     # if the value is an instance of ASObj, finish will be called
     # to get the frozen hash ...
-    def []=k,v
+    def set k,v
       key = k.to_s.to_sym
-      v = v.is_a?(ASObj) ? v.finish : v unless v == nil
+      v = (v.is_a?(ASObj) ? v.finish : v) unless v == nil
       @_[key] = v unless v == nil
       @_.delete key if v == nil
     end
-    alias :set :[]=
+    alias :[]= :set 
+    
     def freeze
       @_.freeze
       super
     end
     
     # Within the generator, any method call that has exactly one 
+    # parameter will be turned into a member of the underlying hash
     def property m, *args, &block
 
       # Return nil if it's looking for an unknown alias_for_* method
@@ -223,11 +230,12 @@ module ActivityStreams
       end
       
       # Now we start to figure out the exact value to set
-      transform, alias_for, checker = [:transform_,:alias_for_,:check_].map {|x| 
-        "#{x}#{m}".to_sym }
+      transform, alias_for, checker = [:transform_,:alias_for_,:check_].map {|x| "#{x}#{m}".to_sym }
+      
+      v = args[0]
       
       # First, if the value given is a ASObj, call finish on it
-      v = (args[0].is_a?(ASObj) ? args[0].finish : args[0]) unless not args[0]
+      v = (v.is_a?(ASObj) ? v.finish : v) unless v == nil
       
       # If it's an Enumerable, but not a Hash, convert to an Array using Map,
       # If each of the member items are ASObj's call finish.
@@ -235,8 +243,13 @@ module ActivityStreams
       
       # If the value is a Time object, let's make sure it's ISO 8601
       v = v.iso8601 if v.is_a? Time
-      
+           
       # Finally, do the object_type specific transform, if any 
+      # note, this could potentially undo the previous checks if 
+      # the transform provided by a given spec module isn't well
+      # behaved. that's ok tho, we'll trust that it's doing the
+      # right thing and just move on ... we're going to be validating
+      # next anyway
       v = method?(transform) ? send(transform, v) : v
       
       # Now let's do validation... unless lenient is set
@@ -258,10 +271,12 @@ module ActivityStreams
       m.freeze
     end
     
-    def from other, &block
+    def from other, *without, &block
       raise ArgumentError unless other.one_of_type?(ASObj,Hash)
       m = ASObj.new other.__object_type
-      other.finish.each_pair {|k,y| m[k] = y }
+      m.pretty if other.pretty?
+      m.lenient if other.lenient?
+      other.finish.each_pair {|k,y| m[k] = y unless without.include? k }
       m.instance_eval &block unless not block_given?
       m.freeze
     end
@@ -346,7 +361,7 @@ module ActivityStreams
         def_alias sym, name if name
       end
       
-      # Define a property as being a string, and additional block
+      # Define a property as being a string, an additional block
       # can be passed in to perform additional checking (e.g. regex matching, etc)
       def def_string sym, name=nil, &block
         def_transform(sym) {|v| 
@@ -399,8 +414,8 @@ module ActivityStreams
           # object_type, if any
           next false unless (v.one_of_type?(Array, Enumerable) && !v.is_a?(Hash))
           v.each {|x| 
-            return false if (object_type && v.__object_type != object_type)
             return false unless x.one_of_type? ASObj, Hash
+            return false if (object_type && v.__object_type != object_type)
           }
           true
         }
@@ -458,16 +473,16 @@ module ActivityStreams
       
       def def_property sym, type=nil, name=nil
         sym = sym.to_s
-        suffix = sym[-1] if sym[-1] == '_'
-        sym = sym[0...-1] if sym[-1] == '_'
         module_eval %Q/
-          def #{sym}#{(suffix ? suffix : '')} &block
-            self[:#{name ? name : sym}] = ASObj.generate(:#{type},true,&block)
+          def #{sym} &block
+            self[:#{name || sym}] = ASObj.generate(:#{type},true,&block)
           end
         /
       end
       private :def_property
     end
+    
+    # Ensure the the Defs module is included in all spec modules...
     extend Defs
     def self.included(other)
       other.extend Defs
@@ -500,6 +515,21 @@ module ActivityStreams
     def_string_array(:downstream_duplicates, :downstreamDuplicates) {|x| Addressable::URI.parse(x).absolute? }
     def_string_array(:upstream_duplicates, :upstreamDuplicates) {|x| Addressable::URI.parse(x).absolute? }
 
+    def attachment m, &block
+      property :attachments, m, &block
+    end
+    
+    def downstream_duplicate m, &block
+      property :downstream_duplicates, m, &block
+    end
+    
+    def upstream_duplicate m, &block
+      property :upstream_duplicates, m, &block
+    end
+
+    # Basic support for external vocabularies..
+    # Developers will have to register their own
+    # specs for these
     def ext_vocab sym, &block
       self[sym] = ASObj.generate(sym,true,&block)
     end
@@ -507,6 +537,7 @@ module ActivityStreams
       module_eval "def #{x}(&block) ext_vocab(:#{x},&block) end"
     end
     
+    # ensure that all spec object include the Defs module...
     include Defs
     def self.included(other)
       other.extend Defs
@@ -566,8 +597,8 @@ module ActivityStreams
   module PositionSpec
     include Spec
     def_numeric     :altitude
-    def_bound_float :longitude, -180.00, 180.00
-    def_bound_float :latitude, -90.00, +90.00
+    def_bound_float :longitude, -180.00..180.00
+    def_bound_float :latitude, -90.00..90.00
   end
   
   module PlaceSpec
@@ -585,6 +616,11 @@ module ActivityStreams
     def_non_negative_int :total_items, :totalItems
     def_object_array     :items
     def_string_array     :object_types, :objectTypes
+    
+    def item m, &block
+      property :items, m, &block
+    end
+    
   end
   
   module AVSpec
@@ -597,7 +633,7 @@ module ActivityStreams
     include ObjectSpec
     def_string       :mime_type, :mimeType
     def_string       :md5
-    def_absolute_iri :file_url, :fileUrl
+    def_absolute_iri :file_url,  :fileUrl
   end
   
   module BinarySpec
@@ -605,16 +641,45 @@ module ActivityStreams
     def_string           :compression
     def_string           :data
     def_non_negative_int :length
+    
+    # Specify the data for the Binary object. The src must be an IO object
+    # or an ArgumentError will be raised. Deflate compression by default,
+    # level 9, pass in :gzip to use Gzip compression or nil to disable
+    # compression entirely. The length and compression fields will automatically
+    # be set. This method will NOT close the src IO when it's done, you'll
+    # need to handle that yourself. Currently this doesn't do any error handling
+    # on the IO read. Also, it currently reads the entire IO stream first, 
+    # buffers it into memory, then compresses before base64 encoding...
+    def data src, compress=:deflate, level=9
+      raise ArgumentError unless src.is_a? IO
+      d = src.read
+      self[:length] = d.length
+      case compress 
+        when :deflate
+          d = Zlib::Deflate.deflate(d,level)
+          self[:compression] = :deflate
+        when :gzip 
+          d = IO.pipe { |r,w|
+            gzip = Zlib::GzipWriter.new(w,level)
+            gzip.write d
+            gzip.close 
+            r.read
+          }
+          self[:compression] = :gzip
+      end
+      self[:data] = Base64.urlsafe_encode64(d)
+    end
+    
   end
   
   module EventSpec
     include ObjectSpec
-    def_object :attended_by, :collection, :attendedBy
-    def_object :attending, :collection, :attending
-    def_object :invited, :collection
+    def_object :attended_by,     :collection, :attendedBy
+    def_object :attending,       :collection
+    def_object :invited,         :collection
     def_object :maybe_attending, :collection, :maybeAttending
     def_object :not_attended_by, :collection, :notAttendedBy
-    def_object :not_attending, :collection, :notAttending
+    def_object :not_attending,   :collection, :notAttending
   end
   
   module IssueSpec
@@ -638,6 +703,15 @@ module ActivityStreams
     def_date_time    :by
     def_object_array :prerequisites, :task
     def_object_array :supersedes, :task
+    
+    def prerequisite m, &block
+      property :prerequisites, m, &block
+    end
+    
+    def supersede m, &block
+      property :supersedes, m, &block
+    end
+    
   end
   
   module ImageSpec
