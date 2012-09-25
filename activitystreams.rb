@@ -488,7 +488,7 @@ module ActivityStreams
     def_date_time    :end_time, :'end-time'
     def_object       :links, :links
     def_object       :author
-    def_object       :image_, :media_link, :image
+    def_object       :img, :media_link, :image
     def_object       :source
     def_object       :location, :place
     def_object       :mood, :mood
@@ -550,7 +550,7 @@ module ActivityStreams
   module MoodSpec 
     include Spec
     def_string :display_name, :displayName
-    def_object :image_, :mediaLink, :image
+    def_object :img, :mediaLink, :image
   end
   
   module AddressSpec 
