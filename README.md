@@ -80,9 +80,7 @@ The Factory methods supported include:
 
 A simple Ruby Activity Streams implementation
 
-Example:
-require 'activitystreams'
-include ActivityStreams
+Example: 
  
 ``` ruby
 #!/Users/james/.rvm/rubies/ruby-1.9.3-p194/bin/ruby
@@ -111,13 +109,13 @@ optparse.parse!
 include ActivityStreams
  
 STDOUT << activity {
-  pretty
-  verb :post
-  actor person {
-    display_name options[:name]
+  pretty                          # causes the json to be pretty printed
+  verb :post                      # verb is "post"
+  actor person {                  # sets the actor property, person object
+    display_name options[:name]   # name is pulled from the command line args
   }
-  obj note {
-    content ARGV.shift
+  obj note {                      # sets the object property, note object
+    content ARGV.shift            # content is pulled from the command line args
   }
 }
 ```
