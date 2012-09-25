@@ -148,6 +148,9 @@ AS.Object = function() {}
 AS.Object.prototype = {
   write: function() {
     return JSON.stringify(this);
+  },
+  toString : function() {
+    return this.write();
   }
 }
 
@@ -162,16 +165,26 @@ AS.Builder = function(o) {
           builder.set(p,v,p.type,p.range);
           return builder;
         }
-        if (p.type == Date) {
+        if (p.type == Date)
           builder[p + "Now"] = function() {
             return builder[p](new Date());
           }
-        }
+        if (p.type == Array)
+          builder["add_" + p] = function(v) {
+            builder.add(p,v,p.type,p.range);
+            return builder;
+          }
       });
     return builder;
   }
 }
 AS.Builder.prototype = {
+  add: function(n,v,t,r) {
+    if (!v) return this;
+    var o = v instanceof AS.Builder ? v.get() : v;
+    this.obj[n] = this.obj[n] || new Array();
+    this.obj[n].push(r?r(o):o);
+  },
   set: function(n,v,t,r) {
     if (!v) return this;
     var o = v instanceof AS.Builder ? v.get() : v;
