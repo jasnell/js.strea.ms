@@ -436,6 +436,9 @@ module ActivityStreams
         def_checker(sym) { |v|
           next true if v == nil
           next false unless v.one_of_type? Array, Enumerable
+          v.each {|x| 
+            return false unless block.call(x) 
+          } if block_given?
           true
         }
         def_alias sym, name if name
@@ -512,8 +515,10 @@ module ActivityStreams
     def_iri          :url
     def_object_array :attachments
     def_object_array :in_reply_to, nil, :inReplyTo
-    def_string_array(:downstream_duplicates, :downstreamDuplicates) {|x| Addressable::URI.parse(x).absolute? }
-    def_string_array(:upstream_duplicates, :upstreamDuplicates) {|x| Addressable::URI.parse(x).absolute? }
+
+    check = lambda {|x| Addressable::URI.parse(x).absolute? }
+    def_string_array :downstream_duplicates, :downstreamDuplicates, &check
+    def_string_array :upstream_duplicates, :upstreamDuplicates, &check
 
     def attachment m, &block
       property :attachments, m, &block
@@ -736,15 +741,15 @@ module ActivityStreams
     include Spec
     # Require that all properties on the Links spec are link objects
     def missing_check v 
-      v.is_one_if? Hash, LinkSpec
+      v.one_of_type? Hash, LinkSpec
     end
     
     def link rel, include_object_type=false, &block
-      self[rel.to_sym] = ASObj.generate(:link,!include_object_type,&block)
+      self[rel.to_sym] = ASObj.generate :link, !include_object_type, &block
     end
     
     def link_with_object_type rel, &block
-      link rel,true,&block
+      link rel, true, &block
     end
   end
   
@@ -779,12 +784,19 @@ module ActivityStreams
     SPECS[sym] = spec
   end
   
-  def spec &block
-    o = Module.new.extend(Spec, Spec::Defs)
+  # create a new Spec module
+  def spec *specs, &block
+    o = Module.new.extend Spec, Spec::Defs, *specs
     o.module_exec &block
     o
   end
-  module_function :add_spec, :spec
+  
+  # create a new Spec module based on ObjectSpec
+  def object_spec *specs, &block
+    specs ObjectSpec, *specs, &block
+  end
+    
+  module_function :add_spec, :spec, :object_spec
   
   # syntactic sugar
   LENIENT, STRICT = true, false

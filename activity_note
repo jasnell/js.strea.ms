@@ -32,7 +32,7 @@ STDOUT << activity {
   obj note {
     content ARGV.shift
     attachment binary {
-      # binary attachments are base64 and compressed automatically for you 
+      # binary attachments are base64 and compressed automatically for you
       File.open('activity_note','r') { |f| 
         data f, :deflate
       } 
