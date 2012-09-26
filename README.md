@@ -251,9 +251,11 @@ my_activity = activity {
   #... set other properies ...
   
   location {
-    altitude 10.0
-    longitude 128.23
-    latitude 95.0       # whoops! .. => ArgumentError 
+    position {
+      altitude 10.0
+      longitude 128.23
+      latitude 95.0       # whoops! .. => ArgumentError 
+    }
   }
   
 }
@@ -267,9 +269,11 @@ my_activity = activity {
   #... set other properies ...
   
   location {
-    altitude 10.0
-    longitude 128.23
-    latitude 95.0, LENIENT    # OK!!
+    position {
+      altitude 10.0
+      longitude 128.23
+      latitude 95.0, LENIENT    # OK!!
+    }
   }
   
 }
@@ -282,10 +286,12 @@ my_activity = activity {
   #... set other properies ...
   
   location {
-    lenient
-    altitude 10.0
-    longitude 128.23
-    latitude 95.0    # OK!!
+    position {
+      lenient
+      altitude 10.0
+      longitude 128.23
+      latitude 95.0    # OK!!
+    }
   }
   
 }
@@ -301,9 +307,11 @@ my_activity = activity {
   #... set other properies ...
   lenient
   location {
-    altitude 10.0
-    longitude 128.23
-    latitude 95.0    # NOT OK!!! => ArgumentError
+    position {
+      altitude 10.0
+      longitude 128.23
+      latitude 95.0    # NOT OK!!! => ArgumentError
+    }
   }
   
 }
