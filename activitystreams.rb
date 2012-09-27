@@ -26,71 +26,128 @@ require "time"
 require 'addressable/uri'
 require 'base64'
 require 'zlib'
+require 'i18n'
+require 'mime/types'
 
 class Hash
+  # allows a Hash to be used in place of an 
+  # ASObj ... we don't necessarily want a 
+  # mixin on this, so just set a property  
   def __object_type= ot
     @object_type = ot
   end
+  
   def __object_type
     @object_type
   end
+
 end
 
 class Object
+
   # Tests whether the method exists. Unlike the std method, however,
   # does not throw a NameError if it doesn't. Just returns false
   def method? sym
     method sym rescue false
   end
+  
   # Tests to see if the Object is one of several possible types
+  # like is_a? but accepting multiple arguments
   def one_of_type? *args
     args.any? {|x| is_a? x}
   end
+
 end
 
 module ActivityStreams
   
+  # Provides a number of generally useful utilities methods
   module Matchers
     include Addressable
+    
+    # true if m validates as a isegment-nz-nc as defined by RFC 3987. 
+    # The activity streams spec requires that verbs and object types 
+    # MUST either be isegment-nz-nc or absolute IRI productions.
     def is_token? m
       return false if m == nil
       m = m.to_s
-      (m =~ /^([a-zA-Z0-9\-\.\_\~]|\%[0-9a-fA-F]{2}|[\!\$\&\'\(\)\*\+\,\;\=])+$/) != nil
+      (m =~ /^([a-zA-Z0-9\-\.\_\~]|\%[0-9a-fA-F]{2}|[\!\$\&\'\(\)\*\+\,\;\=\@])+$/) != nil
     end
+    
+    # true if m is parseable as an IRI and is absolute
     def is_absolute_iri? m
       URI.parse(m).absolute? rescue false
     end
+    
+    # true if m is a valid verb
     def is_verb? m
       is_token?(m) || is_absolute_iri?(m)
     end
+    
+    # true if m is a valid MIME Media Type
+    def is_mime_type? m
+      MIME::Type.new m rescue false
+    end
+    
+    # true if m is a valid RFC 4646 Lang tag
+    def is_lang_tag? m
+      I18n::Locale::Tag::Rfc4646.tag m rescue false
+    end
+    
+    # utility method providing the basic structure of validation 
+    # checkers for the various fields...
     def checker &block
       lambda {|v|
         raise ArgumentError unless block.call v
         v
       }
     end
-    module_function :checker, :is_token?, :is_verb?, :is_absolute_iri?
+    
+    module_function :checker, :is_token?, :is_verb?, :is_absolute_iri?, :is_mime_type?, :is_lang_tag?
+
   end
   
+  # Defines the basic functions for the Activity Streams DSL
   module Makers
+    
+    # Create a new object by copying another. 
+    # A list of properties to omit from the new
+    # copy can be provided a variable arguments.
+    # For instance, if you have an existing activity
+    # object and wish to copy everything but the 
+    # current verb and actor properties, you could
+    # call new_act = copy_from(old_act, :verb, :actor) { ... }
     def copy_from(other,*without,&block)
       ASObj.from other,*without,&block
     end
+    
+    # Create a new Activity Streams Object
     def object(object_type=nil,&block)
       ASObj.generate object_type,&block
     end
+    
+    # Create a new Media Link
     def media_link &block
       ASObj.generate :media_link,true,&block
     end
+    
+    # Create a new Collection Object
     def collection include_object_type=false, &block
       ASObj.generate :collection, !include_object_type, &block
     end
+    
+    # Create a new Activity Object
     def activity include_object_type=false, &block
       ASObj.generate :activity, !include_object_type, &block
     end
+    
+    # Utility method for returning the current time
     def now
       Time.now.utc
     end
+    
+    # For the remain object types from the Activity Streams Schema
+    # iterate through them and create a factory method for each
     [ :alert,
       :application,
       :article,
@@ -131,12 +188,24 @@ module ActivityStreams
   def checker &block
     Matchers.checker &block
   end
+  
   module_function :checker
   
   include Makers, Matchers
   
+  # Represents a basic Activity Streams Object...
+  # Instances, once created, are immutable for 
+  # all the core properties. The object maintains
+  # an internal hash and performs basic input 
+  # validation to ensure that the built object
+  # conforms to the basic requirements of the 
+  # Activity Streams specifications. Specific 
+  # validation requirements are defined by the
+  # Spec module associated with the object_type
+  # specified for the ASObj instance
   class ASObj
     include Makers
+    
     def initialize object_type=nil
       @_ = {}
       @_.__object_type = object_type
@@ -144,41 +213,62 @@ module ActivityStreams
       extend SPECS[object_type] || SPECS[nil]
       strict
     end
+    
+    # Puts this ASObj into lenient validation mode
     def lenient  
       @lenient = true   
     end
+    
+    # Puts this ASObj into strict validation mode
     def strict   
       @lenient = false  
     end
+    
+    # Tells this ASObj to generate formatted JSON output
     def pretty   
       @pretty = true    
     end
+    
+    # true if this ASObj has been configured to generate formatted JSON output
     def pretty?  
       @pretty || false  
     end
+    
+    # true if this ASObj is operating in lenient mode
     def lenient? 
       @lenient          
     end
+    
+    # true if this ASObj is operating in strict mode
     def strict?  
       !lenient?         
     end
+    
+    # the internal object type identifier for this ASObj
     def __object_type 
-      @object_type end
+      @object_type 
+    end
       
     # return a frozen copy of the internal hash
     def finish 
       @_.dup.freeze
     end
     
-    # write this thing out
+    # write this thing out, the param must repond to the << operator for appending
     def append_to out
       raise ArgumentError unless out.respond_to?:<<
       out << to_s
     end
     alias :>> append_to
     
+    # force pretty printing
     def pretty_to out
       out << JSON.pretty_generate(@_)
+    end
+    
+    # generates a copy of this object
+    def copy_of *without, &block
+      ASObj.from self, *without, &block
     end
     
     def to_s
@@ -191,8 +281,8 @@ module ActivityStreams
     protected :[]  
     
     # Sets a value on the internal hash without any type checking
-    # if the value is an instance of ASObj, finish will be called
-    # to get the frozen hash ...
+    # if v is an instance of ASObj, finish will be called
+    # to get the frozen hash ... 
     def set k,v
       key = k.to_s.to_sym
       v = (v.is_a?(ASObj) ? v.finish : v) unless v == nil
@@ -264,9 +354,14 @@ module ActivityStreams
       @_.delete m if v == nil
     end
     alias :method_missing :property
+    
   end
   
   class << ASObj
+    
+    # Performs the actual work of creating an ASObj and executing
+    # the associated block to build it up, then freezing the 
+    # ASObj before returning it
     def generate object_type=nil, do_not_set_object_type=false, &block
       m = ASObj.new object_type
       m[:objectType] = object_type unless do_not_set_object_type
@@ -274,6 +369,7 @@ module ActivityStreams
       m.freeze
     end
     
+    # Creates a new ASObj by copying from another one
     def from other, *without, &block
       raise ArgumentError unless other.one_of_type?(ASObj,Hash)
       m = ASObj.new other.__object_type
@@ -286,8 +382,11 @@ module ActivityStreams
     
   end
   
-  
+  # The base module for all Validation Spec Modules.. these
+  # define the requirements for the various Activity Streams
+  # object types
   module Spec
+    
     # by default, allow all values if a specific check hasn't been provided
     # Spec modules can override this behavior by defining their own missing_check
     def missing_check v
@@ -296,17 +395,24 @@ module ActivityStreams
     
     # Defines the various utility methods used to build Spec modules
     module Defs
+      
+      # Maps an input symbol to a property name in the hash
       def def_alias sym, name
         define_method("alias_for_#{sym}".to_sym) {
           name
         } if name
         module_function "alias_for_#{sym}".to_sym
       end
+      
+      # Defines the method for validating the value of a 
+      # specific property.
       def def_checker sym, &block
         sym = "check_#{sym}".to_sym
         define_method sym,&block
         module_function sym
       end
+      
+      # Defines a transform for the value of a specific property
       def def_transform sym, &block
         sym = "transform_#{sym}".to_sym
         if block_given?
@@ -316,6 +422,7 @@ module ActivityStreams
         end
         module_function sym
       end
+      
       # Mark def_alias, def_checker and def_transform as private
       # these should only be called from within the Defs module
       private :def_alias, :def_checker, :def_transform
@@ -488,6 +595,7 @@ module ActivityStreams
     def self.included(other)
       other.extend Defs
     end
+    
   end
     
   # The base spec for all ASObj's
@@ -532,7 +640,8 @@ module ActivityStreams
 
     # Basic support for external vocabularies..
     # Developers will have to register their own
-    # specs for these
+    # spec modules for these, but we at least 
+    # provide the constructor methods
     def ext_vocab sym, &block
       self[sym] = ASObj.generate(sym,true,&block)
     end
@@ -634,7 +743,7 @@ module ActivityStreams
   
   module FileSpec
     include ObjectSpec
-    def_string       :mime_type, :mimeType
+    def_string       :mime_type, :mimeType do |x| is_mime_type? x end
     def_string       :md5
     def_absolute_iri :file_url,  :fileUrl
   end
@@ -653,10 +762,31 @@ module ActivityStreams
     # need to handle that yourself. Currently this doesn't do any error handling
     # on the IO read. Also, it currently reads the entire IO stream first, 
     # buffers it into memory, then compresses before base64 encoding...
-    def data src, compress=:deflate, level=9
+    def data(src, options={:compress=>:deflate, :level=>9, :hash=>:md5})
+      compress = options.fetch :compress, :deflate
+      level    = options.fetch :level, 9
+      hash     = options.fetch :hash, :md5
       raise ArgumentError unless src.is_a? IO
       d = src.read
       self[:length] = d.length
+      
+      # Optionally generate a digest hash over the read data ... 
+      # TODO: it would be more efficient to do this during the initial read operation...
+      if (hash) then
+        begin 
+          # don't load unless we actually need to calculate hashes...
+          require 'Digest'
+          hash_name = "#{hash.to_s.upcase}".to_sym
+          # init the selected hash module
+          Digest.module_eval "#{hash_name}"
+          # calculate the hash
+          self[hash] = (Digest.module_eval "#{hash_name}.new.hexdigest", d) rescue nil
+        rescue LoadError
+          # oops, an invalid hash alg was selected
+          raise ArgumentError.new("Invalid Hash [#{hash}]")
+        end
+      end
+      
       case compress 
         when :deflate
           d = Zlib::Deflate.deflate(d,level)
@@ -698,9 +828,13 @@ module ActivityStreams
     include ObjectSpec
     def_object       :scope
     def_string_array :actions
+    
+    def action m, &block
+      property :actions, m, &block
+    end
   end
   
-  module RGSpec
+  module RGSpec # For "role" and "group" objects
     include ObjectSpec
     def_object :members, :collection
   end
@@ -735,8 +869,8 @@ module ActivityStreams
     include ObjectSpec
     def_absolute_iri :href
     def_string       :title
-    def_string       :hreflang # TODO: Need to validate language tags
-    def_string       :type     # TODO: Need to validate mime types
+    def_string       :hreflang do |x| is_lang_tag? x end # must be a RFC 4646 tag
+    def_string       :type do |x| is_mime_type? x end # must be a valid MIME Media Type
   end
   
   module LinksSpec
@@ -755,6 +889,7 @@ module ActivityStreams
     end
   end
   
+  # Collect the various Specs and map to their respective object types
   SPECS = {
     nil         => ObjectSpec,
     :activity   => ActivitySpec,
@@ -808,22 +943,63 @@ module ActivityStreams
   
 end
 
-# some syntactic sugar for Integers
-class Integer
+# some syntactic sugar for Fixnums... useful for 
+# working with Time .. e.g. updated now - 1.week #updated one week ago
+class Fixnum
+  
+  # true if this number is within the given range
   def within? r
     raise ArgumentError if not r.is_a?Range
     r.include? self
   end unless method_defined?(:within?)
+  
+  # treats the fixnum as a representation of a number
+  # of milliseconds, returns the approximate total number 
+  # of seconds represented e.g. 1000.milliseconds => 1
+  # fractional seconds are truncated (rounded down)
+  def milliseconds
+    self / 1000
+  end unless method_defined?(:milliseconds)
+  
+  # treats the fixnum as a representation of a number
+  # of seconds
   def seconds
     self
   end unless method_defined?(:seconds)
+  
+  # treats the fixnum as a representation of a
+  # number of minutes and returns the total number
+  # of seconds represented.. e.g. 2.minutes => 120,
+  # 3.minutes => 180
   def minutes
-    self * 60
+    seconds * 60
   end unless method_defined?(:minutes)
+  
+  # treats the fixnum as a representation of a 
+  # number of hours and returns the total number
+  # of seconds represented.. e.g. 2.hours => 7200
   def hours
-    self * 60 * 60
+    minutes * 60
   end unless method_defined?(:hours)
+
+  # treats the fixnum as a representation of a
+  # number of days and returns the total number
+  # of seconds represented.. e.g. 2.days => 172800
+  def days
+    hours * 24
+  end unless method_defined?(:days)
+
+  # treats the fixnum as a representatin of a 
+  # number of weeks and returns the total number
+  # of seconds represented.. e.g. 2.weeks => 1209600 
+  def weeks
+    days * 7
+  end unless method_defined?(:weeks)
+  
   alias second seconds unless method_defined?(:second)
   alias minute minutes unless method_defined?(:minute)
   alias hour hours unless method_defined?(:hour)
+  alias day days unless method_defined?(:day)
+  alias week weeks unless method_defined?(:week)
+  
 end
