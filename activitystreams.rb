@@ -57,8 +57,11 @@ module ActivityStreams
       m = m.to_s
       (m =~ /^([a-zA-Z0-9\-\.\_\~]|\%[0-9a-fA-F]{2}|[\!\$\&\'\(\)\*\+\,\;\=])+$/) != nil
     end
+    def is_absolute_iri? m
+      URI.parse(m).absolute? rescue false
+    end
     def is_verb? m
-      is_token? m || URI.parse(m).absolute?
+      is_token?(m) || is_absolute_iri?(m)
     end
     def checker &block
       lambda {|v|
@@ -66,7 +69,7 @@ module ActivityStreams
         v
       }
     end
-    module_function :checker, :is_token?, :is_verb?
+    module_function :checker, :is_token?, :is_verb?, :is_absolute_iri?
   end
   
   module Makers
@@ -325,8 +328,7 @@ module ActivityStreams
         }
         def_checker(sym) { |v|
           # v must be an absolute IRI
-          next true if v == nil
-          Addressable::URI.parse(v).absolute? rescue false
+          !v || is_absolute_iri?(v)
         }
         def_alias sym, name if name
       end
@@ -334,14 +336,12 @@ module ActivityStreams
       # Define a property as being an ISO 8601 DateTime
       def def_date_time sym, name=nil
         def_transform(sym) {|v| 
-          next nil if v == nil
-          next v if v.is_a?Time
+          next v if v == nil || v.is_a?(Time)
           Time.parse(v.to_s) rescue v
         }
         def_checker(sym) { |v|
           # v must be parseable as a time
-          next true if v == nil
-          next true if v.is_a?Time
+          next true if v == nil || v.is_a?(Time)
           Time.parse(v.to_s) rescue next false
           true
         }
@@ -354,9 +354,8 @@ module ActivityStreams
           next nil if v == nill
           Addressable::URI.parse(v)}
         def_checker(sym) { |v|
-          next true if v == nil
           # v must be parseable as a URI
-          Addressable::URI.parse(v) rescue false
+          !v || Addressable::URI.parse(v) rescue false
         }
         def_alias sym, name if name
       end
@@ -366,13 +365,13 @@ module ActivityStreams
       def def_string sym, name=nil, &block
         def_transform(sym) {|v| 
           next nil if v == nil
-          v.to_s }
+          v.to_s 
+        }
         def_checker(sym) { |v|
           # v will be converted to a string, then checked against the optional
           # block... if the block returns false, raise a validation error
           next true if v == nil
-          v = v.to_s
-          next block.call(v) if block_given?
+          next block.call(v.to_s) if block_given?
           true
         }
         def_alias sym, name if name
@@ -435,7 +434,7 @@ module ActivityStreams
         }
         def_checker(sym) { |v|
           next true if v == nil
-          next false unless v.one_of_type? Array, Enumerable
+          next false unless (v.one_of_type?(Array, Enumerable) && !v.is_a?(Hash))
           v.each {|x| 
             return false unless block.call(x) 
           } if block_given?
@@ -457,11 +456,10 @@ module ActivityStreams
         def_alias sym, name if name
       end
       
-      # Define a property as being a non-negative integer
+      # Define a property as being a non-negative fixnum
       def def_non_negative_int sym, name=nil
         def_numeric(sym, name) {|v| 
-          next false unless v.is_a? Integer 
-          next false unless v >= 0
+          next false unless (v.is_a?(Fixnum) && v >= 0)
           true
         }
       end
@@ -516,7 +514,7 @@ module ActivityStreams
     def_object_array :attachments
     def_object_array :in_reply_to, nil, :inReplyTo
 
-    check = lambda {|x| Addressable::URI.parse(x).absolute? }
+    check = lambda {|x| is_absolute_iri? x }
     def_string_array :downstream_duplicates, :downstreamDuplicates, &check
     def_string_array :upstream_duplicates, :upstreamDuplicates, &check
 
@@ -689,7 +687,11 @@ module ActivityStreams
   
   module IssueSpec
     include ObjectSpec
-    def_string_array(:types) {|v| Addressable::URI.parse(v).absolute? }
+    def_string_array(:types) {|v| is_absolute_iri? v }
+    
+    def type m, &block
+      property :types, m, &block
+    end
   end
   
   module PermissionsSpec
@@ -754,7 +756,7 @@ module ActivityStreams
   end
   
   SPECS = {
-    nil => ObjectSpec,
+    nil         => ObjectSpec,
     :activity   => ActivitySpec,
     :media_link => MediaLinkSpec,
     :mood       => MoodSpec,
@@ -793,8 +795,11 @@ module ActivityStreams
   
   # create a new Spec module based on ObjectSpec
   def object_spec *specs, &block
-    specs ObjectSpec, *specs, &block
+    spec ObjectSpec, *specs, &block
   end
+    
+  # define the template method as an alias to lambda
+  alias :template :lambda
     
   module_function :add_spec, :spec, :object_spec
   
