@@ -498,5 +498,23 @@ The language model here is extremely dynamic. I won't go into details on
 how it works, however. A review of the source code should give you
 an idea if you're curious.
 
-That's it for now, will provide additional detail later on...
+The ActivityStreams module defines a <tt>template</tt> method as an 
+alias of the stock ruby lambda function. Using template (or lambda) 
+allows you to create Activity Streams objects as reusable templates.
+
+``` ruby
+include ActivityStreams
+
+my_note_template = template { |title,name,content|
+  note {
+    display_name title
+    author person {
+      display_name name
+    }
+    content content
+  }
+}
+
+STDOUT << my_note_template['The Title', 'Joe', 'My Note']
+```
 
