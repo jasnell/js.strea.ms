@@ -193,9 +193,9 @@ to the <tt>pretty</tt> function within the activity block.
 ``` ruby
 my_activity = activity {
   pretty
-  verb :post
+  verb  :post
   actor person { display_name 'James' }
-  obj note { content 'This is content' }
+  obj   note { content 'This is content' }
 }
 
 STDOUT << my_activity
@@ -229,7 +229,7 @@ my_activity = activity {
   verb :post
   actor person { display_name 'James' }
   obj note { 
-    content 'This is content' 
+    content    'This is content' 
     attachment binary {
       # binary attachments are base64 and compressed automatically for you
       File.open('activity_note','r') { |f| 
@@ -259,6 +259,26 @@ hash options to nil, respectively:
   data f, compress: nil, hash: nil
 ```
 
+Also note that the data method allows you to pass in a String with a filename
+rather than an IO object. In such cases, the method will handle calling File.open
+for you. Therefore...
+
+``` ruby
+File.open('activity_note','r') { |f| 
+  data f
+} 
+```
+
+Is equivalent to just calling:
+
+``` ruby
+data 'activity_note'
+```
+
+(Obviously, you'll want to be careful with this particular piece so as not to 
+allow the Binary object and data method to introduce security issues into your
+applications.)
+
 There are many properties within an Activity Stream document that have fairly
 specific data type requirements. For instance, the <tt>id</tt> property is 
 required to be an absolute IRI. The <tt>location</tt> property is required to 
@@ -279,9 +299,9 @@ my_activity = activity {
   
   location {
     position {
-      altitude 10.0
+      altitude  10.0
       longitude 128.23
-      latitude 95.0       # whoops! .. => ArgumentError 
+      latitude  95.0       # whoops! .. => ArgumentError 
     }
   }
   
@@ -297,9 +317,9 @@ my_activity = activity {
   
   location {
     position {
-      altitude 10.0
+      altitude  10.0
       longitude 128.23
-      latitude 95.0, LENIENT    # OK!!
+      latitude  95.0, LENIENT    # OK!!
     }
   }
   
@@ -315,9 +335,9 @@ my_activity = activity {
   location {
     position {
       lenient
-      altitude 10.0
+      altitude  10.0
       longitude 128.23
-      latitude 95.0    # OK!!
+      latitude  95.0    # OK!!
     }
   }
   
@@ -335,9 +355,9 @@ my_activity = activity {
   lenient
   location {
     position {
-      altitude 10.0
+      altitude  10.0
       longitude 128.23
-      latitude 95.0    # NOT OK!!! => ArgumentError
+      latitude  95.0    # NOT OK!!! => ArgumentError
     }
   }
   
@@ -367,7 +387,7 @@ s = collection {
       verb   :post
       to     the_actor
       actor  the_actor
-      obj note {
+      obj    note {
         content "Note #{x}"
       }
       self[:location] = the_location
@@ -444,26 +464,26 @@ a item using an iterator and the item function. We could, alternatively,
 specify them as an array...
 
 ``` ruby
-the_actor = person { display_name 'James' }
+the_actor =    person { display_name 'James' }
 the_location = place { display_name 'My Home' }
-the_items = 2.times.map {|x|
-    activity {
-      title  "Item #{x}"
-      verb   :post
-      to     the_actor
-      actor  the_actor
-      obj note {
-        content "Note #{x}"
-      }
-      self[:location] = the_location
-    }
-  }
+the_items =    2.times.map {|x|
+                 activity {
+                   title  "Item #{x}"
+                   verb   :post
+                   to     the_actor
+                   actor  the_actor
+                   obj note {
+                     content "Note #{x}"
+                   }
+                   self[:location] = the_location
+                 }
+               }
 
 s = collection {
-  pretty
-  total_items the_items.length
-  items the_items 
-}
+      pretty
+      total_items the_items.length
+      items       the_items 
+    }
 
 STDOUT << s
 ```
@@ -513,10 +533,10 @@ add_spec :'http://example.org/foo/some/other/object/type', my_spec
 # Then... if you create the object with that type...
 m = object('http://example.org/foo/some/other/object/type') {
   pretty
-  display_name "My Object Type"
-  id 'http://example.org/foo'
-  foo 'bar' ## this will pass validation!
-  foo 'baz' ## this raises an ArgumentError!
+  display_name 'My Object Type'
+  id           'http://example.org/foo'
+  foo          'bar' ## this will pass validation!
+  foo          'baz' ## this raises an ArgumentError!
 }
 ```
 
@@ -535,10 +555,10 @@ include ActivityStreams
 my_note_template = template { |title,name,content|
   note {
     display_name title
-    author person {
-      display_name name
-    }
-    content content
+    author       person {
+                   display_name name
+                 }
+    content      content
   }
 }
 
