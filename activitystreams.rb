@@ -97,10 +97,10 @@ module ActivityStreams
     # utility method providing the basic structure of validation 
     # checkers for the various fields...
     def checker &block
-      lambda {|v|
+      ->(v) do
         raise ArgumentError unless block.call v
         v
-      }
+      end
     end
     
     module_function :checker, :is_token?, :is_verb?, :is_absolute_iri?, :is_mime_type?, :is_lang_tag?
@@ -332,7 +332,7 @@ module ActivityStreams
       
       # If it's an Enumerable, but not a Hash, convert to an Array using Map,
       # If each of the member items are ASObj's call finish.
-      v = v.map {|i| i.is_a?(ASObj) ? i.finish : i } if (v.is_a?(Enumerable) && !v.is_a?(Hash))
+      v = v.map {|i| i.is_a?(ASObj) ? i.finish : i } if v.is_a?(Enumerable) && !v.is_a?(Hash)
       
       # If the value is a Time object, let's make sure it's ISO 8601
       v = v.iso8601 if v.is_a? Time
@@ -343,11 +343,12 @@ module ActivityStreams
       # behaved. that's ok tho, we'll trust that it's doing the
       # right thing and just move on ... we're going to be validating
       # next anyway
-      v = method?(transform) ? send(transform, v) : v
+      v = send transform, v if method? transform
       
       # Now let's do validation... unless lenient is set
       if !args[1] && strict?
-        raise ArgumentError unless (method?(checker) ? send(checker,v) : missing_check(v))
+        ok = method?(checker) ? send(checker,v) : missing_check(v)
+        raise ArgumentError unless ok
       end
       m = send alias_for if method? alias_for
       @_[m] = v unless v == nil
@@ -521,7 +522,7 @@ module ActivityStreams
           next false unless (v.one_of_type?(Array, Enumerable) && !v.is_a?(Hash))
           v.each {|x| 
             return false unless x.one_of_type? ASObj, Hash
-            return false if (object_type && v.__object_type != object_type)
+            return false if (object_type && x.__object_type != object_type)
           }
           true
         }
@@ -548,6 +549,20 @@ module ActivityStreams
           true
         }
         def_alias sym, name if name
+      end
+      
+      def def_boolean sym, name=nil
+        def_transform(sym) {|v|
+          next false if v == nil
+          v ? true : false
+        }
+        def_checker(sym) { |v|
+          v.one_of_type? TrueClass, FalseClass
+        }
+        def_alias sym, name if name
+        
+        module_eval %Q/def #{sym}() property(:'#{sym}', true) end/
+        module_eval %Q/def not_#{sym}() property(:'#{sym}', false) end/
       end
       
       # Define a property as being a Numeric
@@ -622,7 +637,7 @@ module ActivityStreams
     def_object_array :attachments
     def_object_array :in_reply_to, nil, :inReplyTo
 
-    check = lambda {|x| is_absolute_iri? x }
+    check = ->(x){ is_absolute_iri? x }
     def_string_array :downstream_duplicates, :downstreamDuplicates, &check
     def_string_array :upstream_duplicates, :upstreamDuplicates, &check
 
@@ -754,6 +769,33 @@ module ActivityStreams
     def_string           :data
     def_non_negative_int :length
     
+    def init_hasher hash
+      require 'Digest'
+      hash_name = "#{hash.to_s.upcase}"
+      Digest.module_eval "#{hash_name}.new"
+    rescue LoadError
+      raise ArgumentError.new("Invalid Hash [#{hash}]")
+    end
+     
+    def do_compression data, compress, level
+      case compress 
+        when nil then return data
+        when :deflate
+          data = Zlib::Deflate.deflate(data,level)
+        when :gzip 
+          data = IO.pipe { |r,w|
+            gzip = Zlib::GzipWriter.new(w,level)
+            gzip.write data
+            gzip.close 
+            r.read
+          }
+        else raise ArgumentError
+      end
+      data
+    end
+    
+    private :init_hasher, :do_compression
+     
     # Specify the data for the Binary object. The src must be an IO object
     # or an ArgumentError will be raised. Deflate compression by default,
     # level 9, pass in :gzip to use Gzip compression or nil to disable
@@ -766,40 +808,28 @@ module ActivityStreams
       compress = options.fetch :compress, :deflate
       level    = options.fetch :level, 9
       hash     = options.fetch :hash, :md5
+      
       raise ArgumentError unless src.is_a? IO
-      d = src.read
+      
+      # Optionally generate a hash over the data as it is read
+      if hash 
+        hasher = init_hasher(hash)
+        d = src.read {|block| hasher.update block }
+        self[hash] = hasher.hexdigest
+      else
+        d = src.read
+      end
+      
+      # Set the uncompressed length of the data in octets
       self[:length] = d.length
       
-      # Optionally generate a digest hash over the read data ... 
-      # TODO: it would be more efficient to do this during the initial read operation...
-      if (hash) then
-        begin 
-          # don't load unless we actually need to calculate hashes...
-          require 'Digest'
-          hash_name = "#{hash.to_s.upcase}".to_sym
-          # init the selected hash module
-          Digest.module_eval "#{hash_name}"
-          # calculate the hash
-          self[hash] = (Digest.module_eval "#{hash_name}.new.hexdigest", d) rescue nil
-        rescue LoadError
-          # oops, an invalid hash alg was selected
-          raise ArgumentError.new("Invalid Hash [#{hash}]")
-        end
+      # Apply compression if necessary
+      if compress
+        d = do_compression d, compress, level
+        self[:compress] = compress
       end
       
-      case compress 
-        when :deflate
-          d = Zlib::Deflate.deflate(d,level)
-          self[:compression] = :deflate
-        when :gzip 
-          d = IO.pipe { |r,w|
-            gzip = Zlib::GzipWriter.new(w,level)
-            gzip.write d
-            gzip.close 
-            r.read
-          }
-          self[:compression] = :gzip
-      end
+      # Set the data
       self[:data] = Base64.urlsafe_encode64(d)
     end
     
@@ -940,6 +970,70 @@ module ActivityStreams
   
   # syntactic sugar
   LENIENT, STRICT = true, false
+  
+  # Provide additional , currently experimental object types and features
+  # These may change at any time...
+  module Experimental 
+    extend ActivityStreams 
+    
+    ANY = :'*'
+    
+    def verb_object &block
+      ASObj.generate :verb,false,&block
+    end
+    
+    # Experimental!! May change.. see http://goo.gl/x2XZl
+    module VerbSpec
+      include ObjectSpec
+      def_string :value do |x| is_verb? x end
+      def_string_array(:hypernyms) {|x| is_verb? x }
+      def_string_array(:synonyms) {|x| is_verb? x }
+      def_object_array :objects, :object_combination
+    
+      def combo &block
+        ASObj.generate :object_combination,true,&block
+      end 
+    
+      def hypernym x
+        property :hypernyms, x
+      end
+    
+      def synonym x
+        property :synonyms, x
+      end
+    
+      def obj x, &block
+        property :foos, x, &block
+      end
+    end
+  
+    module ObjectCombinationSpec
+      include Spec
+      def_string :actor
+      def_string :obj, :object
+      def_string :target
+      def_boolean :target_required, :targetRequired
+      def_object :templates, :object_templates
+
+      def target t, required=false, &block
+        property :target, t, &block
+        target_required if required
+      end
+
+    end 
+  
+    module ObjectTemplatesSpec
+      include Spec
+      def missing_checker v
+        v.is_a? String
+      end
+    end
+    
+    add_spec :verb, VerbSpec
+    add_spec :object_combination, ObjectCombinationSpec
+    add_spec :object_templates, ObjectTemplatesSpec
+
+  end # END EXPERIMENTAL MODULE
   
 end
 

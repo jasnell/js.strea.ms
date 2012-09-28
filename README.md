@@ -136,6 +136,16 @@ require 'activitystreams'
 include ActivityStreams
 ```
 
+NOTE: The ActivityStreams module currently depends on the following external items:
+
+ * 'json' - For JSON serialization
+ * 'time' - For handling of ISO 8601 Timestamps
+ * 'addressable/uri' - For parsing and validation of IRI's
+ * 'base64' - For Base64-urlsafe in the Binary object type
+ * 'zlib' - For Deflate and GZip compression in the Binary object type
+ * 'i18n' - For RFC 4646 Language Tag validation
+ * 'mime/types' - For MIME Media Type validation
+
 Including the ActivityStreams module will effectively initialize the domain
 specific language. To begin creating an Activity, we simply call the 
 <tt>activity</tt> function and pass in the block that will provide it's 
@@ -147,9 +157,9 @@ do on that object must happen within the block.
 
 ``` ruby
 my_activity = activity {
-  verb :post
+  verb  :post
   actor person { display_name 'James' }
-  obj note { content 'This is content' }
+  obj   note { content 'This is content' }
 }
 ```
 
@@ -223,13 +233,30 @@ my_activity = activity {
     attachment binary {
       # binary attachments are base64 and compressed automatically for you
       File.open('activity_note','r') { |f| 
-        data f, :deflate
+        data f, compress: :deflate, hash: :md5
       } 
     }
   }
 }
 
 STDOUT << my_activity
+```
+By default, the data method illustrated above will apply deflate compression 
+and generate an MD5 digest over the data. The code uses named arguments (in 
+the form of a hash parameter) that can be used to override the default behavior.
+Currently, you can set the compression algorithm and level and the hash algorithm.
+For example, to use Gzip compression at level 1 and a SHA-256 digest instead, 
+you would call:
+
+``` ruby
+    data f, compress: :gzip, level: 1, hash: sha256
+```
+
+To disable compression or hashing entirely, explicitly set the compress and 
+hash options to nil, respectively:
+
+``` ruby
+  data f, compress: nil, hash: nil
 ```
 
 There are many properties within an Activity Stream document that have fairly
