@@ -694,7 +694,7 @@ module ActivityStreams
     def_object_array :cc
     def_object_array :bto
     def_object_array :bcc
-    def_bound_float  :priority, 0.0..1.0
+    def_bound_float  :priority, 0.0..1.0    
   end
   
   module MediaLinkSpec 
@@ -796,11 +796,11 @@ module ActivityStreams
     
     private :init_hasher, :do_compression
      
-    # Specify the data for the Binary object. The src must be an IO object
-    # or an ArgumentError will be raised. Deflate compression by default,
-    # level 9, pass in :gzip to use Gzip compression or nil to disable
-    # compression entirely. The length and compression fields will automatically
-    # be set. This method will NOT close the src IO when it's done, you'll
+    # Specify the data for the Binary object. The src must either be an IO object
+    # or a string containing a file path and name or an ArgumentError will be raised. 
+    # Deflate compression by default, level 9, pass in :gzip to use Gzip compression 
+    # or nil to disable compression entirely. The length and compression fields will 
+    # automatically be set. This method will NOT close the src IO when it's done, you'll
     # need to handle that yourself. Currently this doesn't do any error handling
     # on the IO read. Also, it currently reads the entire IO stream first, 
     # buffers it into memory, then compresses before base64 encoding...
@@ -809,30 +809,34 @@ module ActivityStreams
       level    = options.fetch :level, 9
       hash     = options.fetch :hash, :md5
       
-      raise ArgumentError unless src.is_a? IO
-      
-      # Optionally generate a hash over the data as it is read
-      if hash 
-        hasher = init_hasher(hash)
-        d = src.read {|block| hasher.update block }
-        self[hash] = hasher.hexdigest
+      if src.is_a? String
+        File.open(src, 'r') {|f| data f, options }
       else
-        d = src.read
+        raise ArgumentError unless src.is_a? IO
+      
+        # Optionally generate a hash over the data as it is read
+        if hash 
+          hasher = init_hasher(hash)
+          d = src.read {|block| hasher.update block }
+          self[hash] = hasher.hexdigest
+        else
+          d = src.read
+        end
+      
+        # Set the uncompressed length of the data in octets
+        self[:length] = d.length
+      
+        # Apply compression if necessary
+        if compress
+          d = do_compression d, compress, level
+          self[:compress] = compress
+        end
+      
+        # Set the data
+        self[:data] = Base64.urlsafe_encode64(d)
       end
-      
-      # Set the uncompressed length of the data in octets
-      self[:length] = d.length
-      
-      # Apply compression if necessary
-      if compress
-        d = do_compression d, compress, level
-        self[:compress] = compress
-      end
-      
-      # Set the data
-      self[:data] = Base64.urlsafe_encode64(d)
     end
-    
+        
   end
   
   module EventSpec
@@ -971,6 +975,9 @@ module ActivityStreams
   # syntactic sugar
   LENIENT, STRICT = true, false
   
+  # basic priorities...
+  HIGHEST, HIGH, MEDIUM, NORMAL, LOW, LOWEST, NONE = 1.0, 0.75, 0.50, 0.50, 0.25, 0.00, 0.00
+  
   # Provide additional , currently experimental object types and features
   # These may change at any time...
   module Experimental 
@@ -985,9 +992,10 @@ module ActivityStreams
     # Experimental!! May change.. see http://goo.gl/x2XZl
     module VerbSpec
       include ObjectSpec
-      def_string :value do |x| is_verb? x end
-      def_string_array(:hypernyms) {|x| is_verb? x }
-      def_string_array(:synonyms) {|x| is_verb? x }
+      verb_check = ->(x){is_verb? x}
+      def_string :value, &verb_check
+      def_string_array :hypernyms, &verb_check
+      def_string_array :synonyms, &verb_check
       def_object_array :objects, :object_combination
     
       def combo &block
@@ -1034,7 +1042,7 @@ module ActivityStreams
     add_spec :object_templates, ObjectTemplatesSpec
 
   end # END EXPERIMENTAL MODULE
-  
+    
 end
 
 # some syntactic sugar for Fixnums... useful for 

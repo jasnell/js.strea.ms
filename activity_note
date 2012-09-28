@@ -33,9 +33,7 @@ STDOUT << activity {
     content ARGV.shift
     attachment binary {
       # binary attachments are base64 and compressed automatically for you
-      File.open('activity_note','r') { |f| 
-        data f # will use deflate compression and generate md5 hash by default
-      } 
+      data 'activity_note' # will use deflate compression and generate md5 hash by default
     }
   }
   img {
