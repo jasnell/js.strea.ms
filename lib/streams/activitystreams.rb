@@ -20,7 +20,6 @@
 # }                                          #
 #                                            #
 ##############################################
-
 require 'json'
 require "time"
 require 'addressable/uri'
