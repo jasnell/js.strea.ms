@@ -444,7 +444,7 @@ module ActivityStreams
       def def_date_time sym, name=nil
         def_transform(sym) {|v| 
           next v if v == nil || v.is_a?(Time)
-          Time.parse(v.to_s) rescue v
+          Time.parse(v.to_s).iso8601 rescue v
         }
         def_checker(sym) { |v|
           # v must be parseable as a time
@@ -458,7 +458,7 @@ module ActivityStreams
       # Define a property as being an IRI ... does not have to be absolute
       def def_iri sym, name=nil
         def_transform(sym) {|v| 
-          next nil if v == nill
+          next nil if v == nil
           Addressable::URI.parse(v)}
         def_checker(sym) { |v|
           # v must be parseable as a URI

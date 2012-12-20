@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name        = 'streams'
-  s.version     = '0.1.1'
-  s.date        = '2012-09-29'
+  s.version     = '0.1.2'
+  s.date        = '2012-12-20'
   s.summary     = "An Activity Streams DSL"
   s.description = "An Activity Streams DSL"
   s.authors     = ["James M Snell"]
